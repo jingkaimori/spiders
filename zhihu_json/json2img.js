@@ -9,8 +9,8 @@ const logger = require('./lib/logger');
 logger.debug('======  start spider  ======\r\n');
 
 
-// startLoadÊÇÏÂÔØÍ¼Æ¬µÄº¯Êı¡£
-// ÈôÅÀµ½jsonÎÄ¼şµ«Ã»ÏÂÔØµ½Í¼Æ¬µÄ»°£¬¿ÉÒÔÖ±½ÓÊ¹ÓÃÏÂÃæµÄº¯ÊıÏÂÔØÍ¼Æ¬¡£
+// startLoadæ˜¯ä¸‹è½½å›¾ç‰‡çš„å‡½æ•°ã€‚
+// è‹¥çˆ¬åˆ°jsonæ–‡ä»¶ä½†æ²¡ä¸‹è½½åˆ°å›¾ç‰‡çš„è¯ï¼Œå¯ä»¥ç›´æ¥ä½¿ç”¨ä¸‹é¢çš„å‡½æ•°ä¸‹è½½å›¾ç‰‡ã€‚
 spider.startLoad(function (err) {
   if (err) {
     logger.error('load images fail:', err);

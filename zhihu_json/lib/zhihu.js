@@ -5,6 +5,8 @@
  * 每一页的数据都保存到一个以时间戳为名字的json文件中，以此完成数据的持久化。
  * 下载图片的时候先读取json文件，获取图片途径再进行下载，串行下载每个user的图片。
  * 请求分页数据的并发设置为5，图片下载的并发设置为10。
+ * 
+ * 更新：HTML中没有xsrf
  */
 
 'use strict';
@@ -23,8 +25,17 @@ const logger = require('./logger');
 
 const DATADIR = path.join(__dirname, '../data');
 const IMGDIR = path.join(__dirname, '../imgs');
+/** 问题的落地页 */
 const baseUrl = 'https://www.zhihu.com/question/' + config.questionToken;
-const pageUrl = 'https://www.zhihu.com/node/QuestionAnswerListV2';
+/** 
+ * 回答的查询API，使用json编码 
+ * 加入get方法的URL参数limit和offset以构造完整查询URL
+ */
+const apiUrl = '\
+https://www.zhihu.com/api/v4/questions/20030360/answers?\
+platform=desktop&\
+sort_by=default';
+
 let cookies = config.cookies[0];
 let userAgent = config.userAgent[0];
 //let proxy = config.proxy[0];
@@ -48,7 +59,18 @@ function toCookieStr(cookieObj) {
   }
   return result;
 }
-
+/**
+ * 分页查询类，使用js方式构造。
+ * @param {Number} offset 
+ */
+function Page(offset){
+  const size=5;
+  this.url=apiUrl+'&limit='+size+'&offset='+offset;
+  this.token=config.questionToken;
+  this.size=size;
+  this.offset=offset;
+}
+Page.size=5;
 /**
  * 解析爬取到的html字符串，返回user信息
  * 第一页出错就拿不到_xsrf，没法继续往下走，所以应该终止程序并抛出异常
@@ -63,11 +85,14 @@ function parseHtml(html) {
   let results = [];
   let $ = cheerio.load(html, {
     normalizeWhitespace: true,
-    decodeEntities     : false,
+    decodeEntities: false,
   });
-  let _xsrf = $('[name=_xsrf]').attr('value');
-  let num = $('#zh-question-answer-num').attr('data-num');
-  $('.zm-item-answer').each(function () {
+  /** @deprecated 此属性已弃用 */
+  let _xsrf = null;//$('[name=_xsrf]').attr('value');
+  logger.debug('content=' + $('meta[itemprop=answerCount]').attr('content')
+  )//
+  let num = $('meta[itemprop=answerCount]').attr('content')
+  $('.List-item').each(function () {
     let $item = $(this);
     let _link = $('.author-link', $item);
     let imgs = [];
@@ -75,15 +100,15 @@ function parseHtml(html) {
       imgs.push($(this).attr('data-original'));
     });
     let author = {
-      name     : _link.text(),
-      link     : _link.attr('href'),
-      avatar   : $('.zm-list-avatar', $item).attr('src'),
+      name: _link.text(),
+      link: _link.attr('href'),
+      avatar: $('.zm-list-avatar', $item).attr('src'),
       signature: $('.bio', $item).text(),
-      imgs     : imgs,
+      imgs: imgs,
     };
     results.push(author);
   });
-  return {results: results, _xsrf: _xsrf, num: num};
+  return { results: results, _xsrf: _xsrf, num: num };
 }
 
 /**
@@ -108,7 +133,7 @@ function fetchFirstPage(url, cb) {
       let data = parseHtml(resp.text);
       let cksObj = toCookieObj(resp.headers['set-cookie']);
       let oldcks = toCookieObj(cookies);
-      cksObj._xsrf = cksObj._xsrf || oldcks._xsrf || data._xsrf;
+      cksObj._xsrf = cksObj._xsrf || oldcks._xsrf;
       cookies = toCookieStr(Object.assign({}, oldcks, cksObj));
       // 保存出错不应该终止程序，但是首页出现这样的问题，还是应该cb(err)
       let file = path.join(DATADIR, Date.now().toString().substr(5, 9) + '.json');
@@ -137,40 +162,45 @@ function fetchFirstPage(url, cb) {
  * 爬取分页数据
  * 注意异常处理，后面分页抓取的时候遇到异常不应该终止程序，而是应该捕获异常继续往下走
  * 同理，数据库操作异常也一样不能终止程序，但是要注意将出错信息记录下来。
- * @param <object> opt，分页配置：
+ * HTML文本里没有xsrf
+ * @param {Page} opt 分页配置：
  * - url   : <string> 分页请求路径
  * - token : <number> 问题token
  * - size  : <number> 分页尺寸
  * - offset: <number> 分页偏移量，size*页码
- * @param <function> cb，回调函数，
+ * @param {function} cb 回调函数，
  * - err: 出错信息，外围程序应该捕获这个err，不要让它终止了整个程序
  */
 function fetchPage(opt, cb) {
-  let xsrf = toCookieObj(cookies)._xsrf;
-  let params = JSON.stringify({"url_token": opt.token, "pagesize": opt.size || 10, "offset": opt.offset});
+  //let xsrf = toCookieObj(cookies)._xsrf;
+  //let params = JSON.stringify({ "url_token": opt.token, "pagesize": opt.size || Page.size, "offset": opt.offset });
   request
-    .post(opt.url)
-    .send({method: 'next', params: params})
-    .set('Content-Type', 'application/x-www-form-urlencoded; charset=UTF-8')
+    .get(opt.url)
+    //.send({ method: 'next', params: params })
+    .set('Content-Type', 'text/json; charset=UTF-8')
     .set('User-Agent', userAgent)
-    .set('Cookie', cookies)
-    .set('X-Xsrftoken', xsrf)      //这里要拿上一个返回的cookie中的_xsrf或者是html中埋点的_xsrf
+    //.set('Cookie', cookies)
+    //.set('_xsrf', xsrf)      
+      //这里要拿上一个返回的cookie中的_xsrf或者是html中埋点的_xsrf
+      /*2020年3月30日
+        - 此时的xsrf属性名不再是X-，而是_xsrf。
+        - 不提供_xsrf和cookie也可以使用API
+      */
     .end(function (err, resp) {
       if (err) {
         // 出错也不应该终止程序，所以外围函数要捕获这个err保证下一次调用继续执行
         logger.error('request error: ', err);
         return cb(err);
       }
-      let utfStr = new Buffer(resp.body.msg.join('')).toString('UTF8');
-      let data = parseHtml(utfStr);
+      let data = resp.body;
       let cksObj = toCookieObj(resp.headers['set-cookie']);
       let oldcks = toCookieObj(cookies);
-      cksObj._xsrf = cksObj._xsrf || oldcks._xsrf || data._xsrf;
+      //cksObj._xsrf = cksObj._xsrf || oldcks._xsrf || data._xsrf;
       cookies = toCookieStr(Object.assign({}, oldcks, cksObj));
 
       // 出错也不应该终止程序，所以外围函数要捕获这个err保证下一次调用继续执行
       let file = path.join(DATADIR, Date.now().toString().substr(5, 9) + '.json');
-      fs.writeFile(file, JSON.stringify(data.results), 'utf-8', function (err) {
+      fs.writeFile(file, JSON.stringify(data.data), 'utf-8', function (err) {
         if (err) {
           logger.error('load images error: ', err);
           cb(err);
@@ -208,14 +238,9 @@ function startFetch(cb) {
     logger.debug('fetch first page successfully');
 
     let opts = [];
-    num = Math.ceil(num / 10);
+    num = Math.ceil(num / Page.size);
     for (let i = 1; i < num; i++) {
-      opts.push({
-        url   : pageUrl,
-        token : config.questionToken,
-        size  : 10,
-        offset: 10 * i,
-      });
+      opts.push(new Page(i * Page.size));
     }
     logger.debug('page num: ', num);
 
@@ -227,7 +252,7 @@ function startFetch(cb) {
         logger.debug('------  start fetch page  ------');
         // 无论是否有err，都要保证函数执行下去！所以不能callbace(err)
         // err应该用其他方法收集起来，这里暂不做
-        fetchPage(opt, (err) => {callback()});
+        fetchPage(opt, (err) => { callback() });
       }, delay);
     }, function (err) {
       if (err) {
@@ -288,7 +313,7 @@ function loadImgs(user, cb) {
 function loadUsers(users, cb) {
   async.eachSeries(users, function (user, callback) {
     // 报错也不要终止程序执行
-    loadImgs(user, (err) => {callback()});
+    loadImgs(user, (err) => { callback() });
   }, function (err) {
     if (err) {
       cb(err);
@@ -318,7 +343,7 @@ function startLoad(cb) {
         }
         logger.debug('read file: ', file);
         users = JSON.parse(users);
-        loadUsers(users, (err) => {callback()});
+        loadUsers(users, (err) => { callback() });
       });
     }, function (err) {
       if (err) {
