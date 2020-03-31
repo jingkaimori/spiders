@@ -43,4 +43,7 @@ Temporary Items
 .apdisk
 
 */package-lock.json
+
+#editors
 *.vscode
+*/.jshintrc
