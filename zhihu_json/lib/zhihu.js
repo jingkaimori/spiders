@@ -170,34 +170,34 @@ function getnum(err, data,cb) {
  * @param {function(Error)} cb，回调函数，
  * - err: 出错信息
  */
-function startFetch(cb) {
+async function startFetch(cb) {
   var firstPage = new Page(0);
-  fetchPage(firstPage,getnum,function (err, num) {
-      // 第一页出错应该终止程序并抛出异常
-      if (err) {
-        return cb(err);
-      }
-      let opts = [];
-      num = Math.ceil(num / Page.size);
-      for (let i = 0; i < num; i++) {
-        opts.push(new Page("",i*Page.size));
-      }
-      logger.debug('page num: ', num);
-
-      // 开始爬取其他页面，控制最大并发数为5，这里出错不调用cb
-      async.eachLimit(opts, 5, function (opt, callback) {
-        // 加点随机性，模仿人类操作
-        let delay = parseInt((Math.random() * 30000000) % 2000);
-        setTimeout(function () {
-          logger.debug('------  start fetch page  ------');
-          // 无论是否有err，都要保证函数执行下去！所以不能callbace(err)
-          // err应该用其他方法收集起来，这里暂不做
-          fetchPage(opt,saveData,callback);
-        }, delay);
-      }, (err)=>{
-        errHandler(err,'======  finish fetch all  ======',null,cb);
-      });
-    });
+  try{
+    var num = await fetchPage(firstPage,getnum);
+    let opts = [];
+    num = Math.ceil(num / Page.size);
+    for (let i = 0; i < num; i++) {
+      opts.push(new Page("",i*Page.size));
+    }
+    logger.debug('page num: ', num);
+    // 开始爬取其他页面，控制最大并发数为5，这里出错不调用cb
+  }catch(err){
+    // 第一页出错应该终止程序并抛出异常
+    cb(err);
+  }
+  
+  async.eachLimit(opts, 5, function (opt, callback) {
+    // 加点随机性，模仿人类操作
+    let delay = parseInt((Math.random() * 30000000) % 2000);
+    setTimeout(function () {
+      logger.debug('------  start fetch page  ------');
+      // 无论是否有err，都要保证函数执行下去！所以不能callbace(err)
+      // err应该用其他方法收集起来，这里暂不做
+      fetchPage(opt,saveData,callback);
+    }, delay);
+  }, (err)=>{
+    errHandler(err,'======  finish fetch all  ======',null,cb);
+  });
 }
 
 /**
